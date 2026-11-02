@@ -1,0 +1,12 @@
+prefix=@DEST_DIR@
+libdir=@DEST_DIR@/lib
+includedir=@DEST_DIR@/include
+version=@PROJECT_VERSION@
+
+Name: libirc
+Description: IRC client library
+Version: @PROJECT_VERSION@
+Requires:
+Conflicts:
+Cflags: -I${includedir}
+Libs: -L${libdir} -lirc
