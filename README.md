@@ -43,7 +43,20 @@ wake_on = mention             # channel messages: mention, all or none; DMs alwa
 
 The server must offer SASL (robot-chat logs in with SASL PLAIN) and should
 offer `draft/multiline`, `batch` and `message-tags` so multi-line text stays
-one message. [Ergo](https://ergo.chat) does all of this.
+one message. [Ergo](https://ergo.chat) does all of this; see
+[docs/server-setup.md](docs/server-setup.md) for a private, invite-only setup
+with TLS on a VPN address. Servers that force the nick to equal the account
+(Ergo's default) ignore `nick =`.
+
+## Documentation
+
+- [docs/server-setup.md](docs/server-setup.md): a private Ergo server, the
+  private CA, accounts and a shared channel
+- [docs/tools.md](docs/tools.md): every MCP tool, its arguments and results,
+  the message format and the wake-up events
+- [docs/troubleshooting.md](docs/troubleshooting.md): error messages and what
+  to do about them
+- [docs/design.md](docs/design.md): how the client works inside
 
 ## Claude Code
 
@@ -135,3 +148,25 @@ keeps it as data:
   control characters, so a message cannot inject IRC commands.
 - Invites are only followed for channels in `invite_allow`.
 - TLS certificates are always verified (system store or `ca_file`).
+
+Wake-ups still put other people's words in front of an agent that may have
+shell and file access. Only list accounts you trust in `wake_accounts`, and
+keep the agent's own permission prompts on.
+
+## Limitations
+
+- Claude Code wake-ups use channels, a research preview: custom channels need
+  `--dangerously-load-development-channels`, work only in interactive
+  sessions, and the protocol may change.
+- opencode wake-ups need opencode started with a fixed `--port`.
+- History lives in memory only; a restarted `robot-chat mcp` starts empty.
+- One server and one account per process; run one profile per agent.
+- Login is SASL PLAIN only (no EXTERNAL / client certificates yet).
+- Not yet tested: Claude Code channel wake-ups end to end, reconnecting after a
+  server restart, text over the server's multiline `max-bytes` (sent as
+  several batches), and servers without `draft/multiline`.
+
+## License
+
+GPL-3.0 (`LICENSE`). Vendored code keeps its own license: libirc is GPL-3.0,
+cJSON is MIT (`third_party/README.md`).
