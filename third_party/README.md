@@ -5,43 +5,47 @@
 - Upstream: https://github.com/n0la/libirc
 - Version: 0.2.2, commit `c083bf664380921f9084ea3a09e8d8d932206fe2` (2025-08-13)
 - License: GPL-3.0 (`libirc/COPYING`)
-- Copied unmodified with `git archive`, minus upstream's `.github/`.
-  Fixes and workarounds live in the robot-chat client, not here.
+- Copied with `git archive`, minus upstream's `.github/`.
 
-To update, replace `libirc/` with a newer `git archive` and update the commit above.
+robot-chat builds only the message parser and its helpers (`lib/message.c`,
+`lib/tag.c`, `lib/strbuf.c`, `lib/util.c`) straight from its own
+`CMakeLists.txt`. libirc's connection, send queue, TLS and config code are not
+used, so the problems listed below do not affect robot-chat. libirc's own
+`CMakeLists.txt` is kept for reference and still builds and passes its tests.
 
-### Building
+### Local changes
 
-Build against GnuTLS. `CMakeLists.txt` prefers libtls whenever
-`pkg-config libtls` succeeds (Debian: `libretls-dev`), and the libtls backend
-never performs the handshake (see below). Build deps: cmake, bison, flex,
-pkg-config, libgnutls28-dev, libcmocka-dev (required even though only the
-tests use it).
+Both in `lib/message.c`, marked "robot-chat local change", and covered by
+`tests/test_parse.c`:
 
-### Known issues the client has to handle
+- The trailing parameter is taken verbatim to the end of the line. Upstream
+  split it on spaces and re-joined the words with single spaces, which
+  collapsed runs of spaces and dropped leading ones (code and indentation in
+  messages).
+- An empty trailing parameter (`PRIVMSG #c :`) is kept as `""` instead of
+  being dropped.
 
-- **Send queue is LIFO.** `irc_queue_pop()` takes from the tail that
-  `irc_queue_push()` appends to, so commands queued between two `irc_pop()`
-  calls go out in reverse order. Pop after every queued command, or bypass the
-  queue (`irc_message_string()` + `irc_client_write()`), especially for
-  multi-line text and `BATCH` start/end lines.
-- **No CR/LF/NUL filtering.** `irc_message_string()` copies arguments as is, so
-  a newline in a message injects IRC commands. Split text on `\n` and strip
-  `\r` and `\0` before building messages.
-- **No SASL, PASS or CAP.** `irc_think()` sends `USER` and `NICK` on its own.
-  Write `PASS account:password` (or CAP/SASL) raw with `irc_client_write()`
-  right after connecting, before the first `irc_think()`.
-- **TLS trusts only the system CA store** (GnuTLS backend). There is no option
-  for a private CA.
-- **libtls backend never connects.** `irc_ssl_client_new()` creates the TLS
-  context, so `irc_ssl_client_connect()` returns success without a handshake.
-- **Auto-joins on INVITE.** The built-in INVITE handler joins any channel the
-  bot is invited to, and reads `args[1]` after checking only for one argument.
-- **PONG has no token.** The PING handler replies with a bare `PONG`.
-- **`irc_think()` parses one line per call** and returns success when there is
-  nothing to parse, so call it in a loop after each read.
-- **No reconnect after disconnect.** `irc_client_disconnect()` frees the stored
-  host and port, so `irc_client_connect()` cannot reconnect; use
-  `irc_client_connect2()`. A failed TLS handshake leaves the socket open.
-- **No multiline support.** Tags are supported (`irc/tag.h`), so
-  `draft/multiline` batches can be built on top.
+To update, replace `libirc/` with a newer `git archive`, re-apply these two
+changes and update the commit above.
+
+### Known problems in the parts robot-chat does not use
+
+- The send queue is LIFO: `irc_queue_pop()` takes from the tail that
+  `irc_queue_push()` appends to.
+- `irc_message_string()` does not filter CR, LF or NUL in arguments, and only
+  prefixes an argument with `:` when it contains a space.
+- No SASL, PASS or CAP support; `irc_think()` sends USER and NICK itself.
+- The GnuTLS backend trusts only the system CA store; the libtls backend never
+  performs the handshake (`irc_ssl_client_new()` already creates the context,
+  so `irc_ssl_client_connect()` returns early). CMake prefers libtls.
+- The INVITE handler joins any channel and reads `args[1]` after checking for
+  one argument; the PING handler answers with a bare `PONG`.
+- `irc_think()` parses one line per call; `irc_client_disconnect()` frees the
+  host and port so `irc_client_connect()` cannot reconnect.
+
+## cJSON
+
+- Upstream: https://github.com/DaveGamble/cJSON
+- Version: 1.7.18, commit `acc76239bee01d8e9c858ae2cab296704e52d916` (2024-05-13)
+- License: MIT (`cjson/LICENSE`)
+- Only `cJSON.c` and `cJSON.h`, unmodified.

@@ -95,6 +95,11 @@ static void irc_message_add(char ***ac, size_t *av, strbuf_t b, bool final)
     }
 
     dup = strbuf_strdup(b);
+    if (dup == NULL) {
+        /* robot-chat local change: an empty trailing parameter (":") left
+         * the buffer unallocated and the argument was dropped */
+        dup = strdup("");
+    }
     irc_strv_add(ac, av, dup);
 }
 
@@ -171,13 +176,20 @@ irc_error_t irc_message_parse(irc_message_t c, char const *l, size_t len)
                     }
                 }
 
-                if (final == false) {
+                /* robot-chat local change: the trailing parameter runs to
+                 * the end of the line, so take the rest of the line as is
+                 * instead of re-joining space-split words, which collapsed
+                 * runs of spaces.
+                 */
+                if (part[1] != '\0') {
                     strbuf_append(argbuf, part + 1, strlen(part) - 1);
-                    final = true;
-                } else {
-                    strbuf_append(argbuf, " ", 1);
-                    strbuf_append(argbuf, part, strlen(part));
                 }
+                if (line != NULL) {
+                    strbuf_append(argbuf, " ", 1);
+                    strbuf_append(argbuf, line, strlen(line));
+                    line = NULL;
+                }
+                final = true;
             } else {
                 if (argbuf == NULL) {
                     irc_message_add2(&args, &argslen, part);
