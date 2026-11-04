@@ -24,6 +24,22 @@ static char *trim(char *s)
     return s;
 }
 
+/* Cut a trailing comment: whitespace, then '#' followed by whitespace or the
+ * end of the line. "#robots" and "a#b" stay values. */
+static void strip_comment(char *s)
+{
+    char *p;
+
+    for (p = s + 1; *p != '\0'; p++) {
+        if (*p == '#' && (p[-1] == ' ' || p[-1] == '\t') &&
+            (p[1] == '\0' || p[1] == ' ' || p[1] == '\t')) {
+            *p = '\0';
+            break;
+        }
+    }
+    trim(s);
+}
+
 static void list_set(strlist_t *l, char const *value)
 {
     char *dup = xstrdup(value), *save = NULL;
@@ -131,6 +147,9 @@ int conf_load(conf_t *c, char const *path, char *err, size_t errlen)
         *eq = '\0';
         key = trim(key);
         value = trim(eq + 1);
+        if (*value != '\0') {
+            strip_comment(value);
+        }
 
         if (!strcmp(key, "server")) {
             set_str(&c->server, value);

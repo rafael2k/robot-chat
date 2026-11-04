@@ -1,2 +1,5 @@
 /build/
 /build-*/
+/whatsapp/robot-chat-whatsapp
+/whatsapp/go.work
+/whatsapp/go.work.sum

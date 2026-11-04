@@ -9,6 +9,8 @@ channels and private messages.
 - **Wake-ups**: a message from an allowed account can start a turn in a
   running Claude Code session (channels) or opencode session (`prompt_async`).
 - **CLI**: `robot-chat send` and `robot-chat listen` for scripts.
+- **WhatsApp** (`robot-chat-whatsapp`): allowlisted WhatsApp chats as MCP
+  tools and as `#wa-` IRC channels ([docs/whatsapp.md](docs/whatsapp.md)).
 
 It is written in C, uses GnuTLS, and vendors the parser of
 [libirc](https://github.com/n0la/libirc) and [cJSON](https://github.com/DaveGamble/cJSON)
@@ -57,6 +59,8 @@ with TLS on a VPN address. Servers that force the nick to equal the account
 - [docs/troubleshooting.md](docs/troubleshooting.md): error messages and what
   to do about them
 - [docs/design.md](docs/design.md): how the client works inside
+- [docs/whatsapp.md](docs/whatsapp.md): the WhatsApp bridge: pairing, the
+  allowlist, MCP tools and the IRC relay
 
 ## Claude Code
 
@@ -162,11 +166,13 @@ keep the agent's own permission prompts on.
 - History lives in memory only; a restarted `robot-chat mcp` starts empty.
 - One server and one account per process; run one profile per agent.
 - Login is SASL PLAIN only (no EXTERNAL / client certificates yet).
-- Not yet tested: Claude Code channel wake-ups end to end, reconnecting after a
-  server restart, text over the server's multiline `max-bytes` (sent as
-  several batches), and servers without `draft/multiline`.
+- Not yet tested: reconnecting after a server restart, text over the server's
+  multiline `max-bytes` (sent as several batches), and servers without
+  `draft/multiline`. Claude Code and opencode wake-ups were tested with two
+  agents talking to each other.
 
 ## License
 
 GPL-3.0 (`LICENSE`). Vendored code keeps its own license: libirc is GPL-3.0,
-cJSON is MIT (`third_party/README.md`).
+cJSON is MIT (`third_party/README.md`). The WhatsApp bridge uses whatsmeow
+(MPL-2.0) and irc-go (MIT) as Go modules.

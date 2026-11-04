@@ -45,7 +45,9 @@ The password file is group- or world-readable. `chmod 600` it.
 
 **`server and account are required` / `no password (set password_file)` /
 `unknown key 'x'`**
-A profile problem; the message names the file and line.
+A profile problem; the message names the file and line. A comment after a
+value needs whitespace before the `#` and a space after it (`tls = no  # ...`);
+`#robots` is a value.
 
 ## Channels
 
@@ -121,3 +123,32 @@ line per message for it. Agents always get the joined text.
 **Indentation or spacing is wrong**
 robot-chat keeps spaces and tabs exactly in both directions. If text looks
 wrong only in one IRC client, it is probably that client's rendering.
+
+## WhatsApp
+
+**`the WhatsApp daemon is not running`** (from `wa_*` tools or the CLI)
+`systemctl --user status robot-chat-whatsapp`, and
+`journalctl --user -u robot-chat-whatsapp`.
+
+**`logged out by WhatsApp ... the device was unlinked`** (exit status 3)
+The device was removed on the phone, or the phone was offline for about two
+weeks. Pair again: `robot-chat-whatsapp serve -phone +<number>`, then start the
+service.
+
+**`another client connected with this device (stream replaced)`**
+Two processes used the same store. Run only the service; `pair` and `unlink`
+refuse while it runs.
+
+**The phone will not read the QR code**
+Use a pairing code instead (`-phone`): Link a device → *Link with phone number
+instead*.
+
+**`chats -recent` shows nothing**
+Activity times come from the history sync right after pairing (only the process
+that paired gets it) and from live messages. Pair with `serve -phone`, or wait.
+
+**`chat 'x' is read-only`**
+Set it to `rw` in the profile and restart the service.
+
+**`over send_rate`**
+More than `send_rate` messages to WhatsApp in a minute, all agents together.
