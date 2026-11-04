@@ -227,3 +227,22 @@ func TestHistoryTrimByTime(t *testing.T) {
 		t.Fatalf("kept %v", texts)
 	}
 }
+
+func TestMediaPath(t *testing.T) {
+	for _, c := range []struct{ mime, name, want string }{
+		{"image/jpeg", "", ".jpg"},
+		{"audio/ogg; codecs=opus", "", ".ogg"},
+		{"application/pdf", "Report.PDF", ".pdf"},
+		{"application/octet-stream", "a.tar.gz", ".gz"},
+		{"application/x-unknown-thing", "", ".bin"},
+		{"image/png", "../../evil", ".png"},
+	} {
+		if got := mediaExt(c.mime, c.name); got != c.want {
+			t.Errorf("mediaExt(%q, %q) = %q, want %q", c.mime, c.name, got, c.want)
+		}
+	}
+	en := entry{Time: "2026-11-04T21:07:05.123Z", Chat: "team", WAID: "3EB0/../AB12"}
+	if got, want := mediaPath("/m", en, ".jpg"), "/m/team/20261104-210705-3EB0AB12.jpg"; got != want {
+		t.Errorf("mediaPath = %q, want %q", got, want)
+	}
+}

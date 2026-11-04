@@ -6,6 +6,7 @@ import (
 	"unicode/utf8"
 
 	"go.mau.fi/whatsmeow/proto/waE2E"
+	"google.golang.org/protobuf/reflect/protoreflect"
 )
 
 // cleanText makes text safe to relay: valid UTF-8, \r\n and \r as \n, and no
@@ -52,10 +53,20 @@ func firstLine(s string, max int) string {
 	return s
 }
 
+// unwrap takes the content out of wrappers that whatsmeow leaves in place:
+// an album's images come as "associated child" messages.
+func unwrap(m *waE2E.Message) *waE2E.Message {
+	for m.GetAssociatedChildMessage().GetMessage() != nil {
+		m = m.GetAssociatedChildMessage().GetMessage()
+	}
+	return m
+}
+
 // messageText turns a WhatsApp message into text. Media becomes a
-// "[image] caption" style marker; the media itself is not downloaded.
+// "[image] caption" style marker; the file itself is saved by saveMedia.
 // Returns "" for messages with nothing to show (receipts, key updates, ...).
 func messageText(m *waE2E.Message) string {
+	m = unwrap(m)
 	if m == nil {
 		return ""
 	}
@@ -91,6 +102,9 @@ func messageText(m *waE2E.Message) string {
 		ctx = m.DocumentMessage.GetContextInfo()
 	case m.StickerMessage != nil:
 		text = "[sticker]"
+	case m.AlbumMessage != nil:
+		a := m.AlbumMessage
+		text = fmt.Sprintf("[album: %d images, %d videos]", a.GetExpectedImageCount(), a.GetExpectedVideoCount())
 	case m.LocationMessage != nil:
 		l := m.LocationMessage
 		text = fmt.Sprintf("[location %.5f,%.5f] %s", l.GetDegreesLatitude(), l.GetDegreesLongitude(), l.GetName())
@@ -117,4 +131,15 @@ func messageText(m *waE2E.Message) string {
 		}
 	}
 	return text
+}
+
+// messageKinds lists the fields set in m, to log messages messageText
+// does not know.
+func messageKinds(m *waE2E.Message) string {
+	var kinds []string
+	m.ProtoReflect().Range(func(fd protoreflect.FieldDescriptor, _ protoreflect.Value) bool {
+		kinds = append(kinds, fd.JSONName())
+		return true
+	})
+	return strings.Join(kinds, ",")
 }

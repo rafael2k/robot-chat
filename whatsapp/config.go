@@ -27,6 +27,8 @@ type config struct {
 	MyName     string
 	SendPrefix bool
 	SendRate   int
+	MediaDir   string // "": media not saved
+	MediaMaxMB int
 	Chats      []*chatConf
 
 	IRCServer        string
@@ -104,6 +106,7 @@ func loadConfig(path string) (*config, error) {
 		MyName:           "me",
 		SendPrefix:       true,
 		SendRate:         10,
+		MediaMaxMB:       25,
 		IRCPort:          "",
 		IRCChannelPrefix: "#wa-",
 	}
@@ -117,6 +120,7 @@ func loadConfig(path string) (*config, error) {
 	}
 
 	var passwordFile string
+	mediaDir := "" // default: next to the store
 	sc := bufio.NewScanner(f)
 	for n := 1; sc.Scan(); n++ {
 		line := strings.TrimSpace(sc.Text())
@@ -149,6 +153,12 @@ func loadConfig(path string) (*config, error) {
 		case "send_rate":
 			if c.SendRate, err = strconv.Atoi(v); err != nil || c.SendRate < 1 {
 				return nil, bad("send_rate must be a number >= 1")
+			}
+		case "media":
+			mediaDir = expandHome(v)
+		case "media_max_mb":
+			if c.MediaMaxMB, err = strconv.Atoi(v); err != nil || c.MediaMaxMB < 1 {
+				return nil, bad("media_max_mb must be a number >= 1")
 			}
 		case "chat":
 			// chat = NAME JID [ro|rw]
@@ -209,6 +219,14 @@ func loadConfig(path string) (*config, error) {
 	}
 	if err := sc.Err(); err != nil {
 		return nil, err
+	}
+
+	switch mediaDir {
+	case "":
+		c.MediaDir = strings.TrimSuffix(c.Store, ".db") + "-media"
+	case "no", "off", "none":
+	default:
+		c.MediaDir = mediaDir
 	}
 
 	if c.IRCServer != "" {

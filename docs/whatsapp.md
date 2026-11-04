@@ -65,7 +65,9 @@ irc_send_accounts = rafael, claude, opencode  # may send to rw chats from IRC
   from the account's number.
 - Leave out `irc_server` for MCP only.
 - Other keys: `socket` (default `$XDG_RUNTIME_DIR/robot-chat-whatsapp.sock`),
-  `history` (messages kept, default 1000), `irc_port`, `irc_tls`,
+  `history` (messages kept, default 1000), `media` (where images, videos,
+  audio and documents are saved, default `whatsapp-media` next to `store`;
+  `no` to save none), `media_max_mb` (default 25), `irc_port`, `irc_tls`,
   `irc_ca_file`, `irc_channel_prefix` (default `#wa-`).
 - A comment can follow a value after whitespace and `# `.
 
@@ -79,15 +81,20 @@ One of:
 
 ```sh
 robot-chat-whatsapp serve -phone +5511999999999   # pairing code, then keeps running
+robot-chat-whatsapp serve -png /run/user/1000/qr.png  # QR code (terminal and PNG), then keeps running
 robot-chat-whatsapp pair -phone +5511999999999    # pairing code, then exits
-robot-chat-whatsapp pair -png /run/user/1000/qr.png   # QR code (terminal and PNG)
+robot-chat-whatsapp pair -png /run/user/1000/qr.png   # QR code, then exits
 ```
 
 With a pairing code: on the phone, WhatsApp → Settings → Linked devices →
 Link a device → *Link with phone number instead*, and type the code (about 2
 minutes). With a QR code, scan it on that same screen.
 
-Prefer `serve -phone`: right after pairing the phone sends a *history sync*
+The QR changes every 20 seconds or so; `feh -R 1 qr.png` keeps showing the
+current one. Scan with the phone of the account you mean to link: the bridge
+links whichever account scans it.
+
+Prefer `serve`: right after pairing the phone sends a *history sync*
 (recent messages and every chat's last activity) once, and only the process
 that paired receives it. `pair` exits after 15 seconds and misses most of it.
 
@@ -128,9 +135,22 @@ Finding chats for the profile (daemon running):
 ```sh
 robot-chat-whatsapp chats hermes            # groups and saved contacts matching "hermes"
 robot-chat-whatsapp chats -recent hermes    # only ones with activity, newest first
+                                            # [community] shows the community a group is in
 robot-chat-whatsapp status
 robot-chat-whatsapp send team 'hello'       # from you, no prefix (rw chats only)
+robot-chat-whatsapp backfill team 100       # ask the phone for older messages
+robot-chat-whatsapp backfill -latest team   # ... before the newest one, to fill gaps
 ```
+
+A chat added to the allowlist after pairing has no stored messages:
+`backfill` asks the phone for up to COUNT messages older than the oldest one
+stored (with none stored, it waits for the chat's next message and asks
+then). The phone answers in a while with an on-demand history sync; the
+messages show up in `wa_read` with `"history": true`, and their media is
+saved if WhatsApp's servers still have it (usually for a few weeks).
+Messages that reached the bridge while their chat was not allowlisted were
+dropped, and the phone does not send them again: to get those, forward them
+to an allowlisted chat, or link the bridge again (a fresh history sync).
 
 After editing the profile: `systemctl --user restart robot-chat-whatsapp`.
 
@@ -172,8 +192,10 @@ Messages look like `irc_read`'s:
 
 - A new session's cursor starts at the current end; `after_id: 0` reads the
   stored history. Messages from the history sync carry `"history": true`.
-- Media is not downloaded: it shows as `[image] caption`, `[voice message 7s]`,
-  `[document: a.pdf]`, and so on. A reply starts with `> ` and the quoted
+- Media shows as `[image] caption`, `[voice message 7s]`,
+  `[document: a.pdf]`, and so on; when the file was saved, `"media"` is its
+  path (`<media>/<chat>/<date>-<time>-<id>.<ext>`), which the agent can
+  read. Stickers are not saved. A reply starts with `> ` and the quoted
   line. Edits carry `"edited": true`.
 - `from` is the saved contact name, else `~` and the WhatsApp profile name.
 
@@ -187,7 +209,8 @@ sends no wake-up events.
   bridge keeps the time of its last message and a message count
   (`whatsapp-activity.json`), for `chats -recent`; no text and no senders.
 - The store (session keys), the history (`whatsapp-history.json`) and the
-  activity file are mode 600 next to `store`; the socket is mode 600.
+  activity file are mode 600 next to `store`; the socket is mode 600. Saved
+  media is mode 600 in mode 700 folders, for allowlisted chats only.
 - Agents' messages go out from the account's number to real people. The MCP
   instructions tell the agent to send only what its user asked for, and never
   because a WhatsApp message told it to. `send_prefix` marks them, `send_rate`

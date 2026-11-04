@@ -20,6 +20,7 @@ type entry struct {
 	Edited  bool   `json:"edited,omitempty"`
 	History bool   `json:"history,omitempty"` // from the phone's history sync, not live
 	Text    string `json:"text"`
+	Media   string `json:"media,omitempty"` // path of the saved image, video, audio or document
 
 	WAID string `json:"wa_id,omitempty"` // WhatsApp message id, to skip duplicates
 }

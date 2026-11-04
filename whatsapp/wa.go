@@ -67,6 +67,9 @@ type bridge struct {
 
 	sendMu    sync.Mutex
 	sendTimes []time.Time
+
+	backfillMu      sync.Mutex
+	pendingBackfill map[string]int // chat name: messages to ask for on its next message
 }
 
 func newBridge(cfg *config, dev *store.Device) *bridge {
@@ -76,11 +79,11 @@ func newBridge(cfg *config, dev *store.Device) *bridge {
 		hist: newHistory(cfg.History),
 		act:  loadActivity(strings.TrimSuffix(cfg.Store, ".db") + "-activity.json"),
 		fail: make(chan error, 1),
+
+		pendingBackfill: map[string]int{},
 	}
 	b.histPath = strings.TrimSuffix(cfg.Store, ".db") + "-history.json"
 	b.hist.load(b.histPath, func(e entry) bool { return cfg.chatByName(e.Chat) != nil })
-	// History syncs are read for the chats' activity times only; their
-	// messages are not imported, agents only see live ones.
 	b.cli.AddEventHandler(b.onEvent)
 	return b
 }
@@ -231,10 +234,12 @@ func (b *bridge) renameUnknown() {
 func (b *bridge) onMessage(e *events.Message) {
 	b.act.seen(b.pnChat(&e.Info), e.Info.Timestamp, true)
 	if en, ok := b.entryFor(e); ok {
+		en.Media = b.saveMedia(e.Message, en)
 		en = b.hist.add(en)
 		if b.irc != nil {
 			b.irc.relay(en)
 		}
+		b.runPendingBackfill(en.Chat)
 	}
 }
 
@@ -253,6 +258,9 @@ func (b *bridge) entryFor(e *events.Message) (entry, bool) {
 	}
 	text := messageText(m)
 	if text == "" {
+		if kinds := messageKinds(m); kinds != "" && kinds != "senderKeyDistributionMessage" && kinds != "messageContextInfo" {
+			warnf("%s: skipped a message with only %s", cc.Name, kinds) // field names only, no content
+		}
 		return entry{}, false
 	}
 	return entry{
@@ -277,16 +285,30 @@ func (b *bridge) fromHistory(h *waHistorySync.HistorySync) int {
 		if err != nil || b.cfg.chatByJID(jid) == nil {
 			continue
 		}
+		bad, empty, known := 0, 0, 0
 		for _, hm := range conv.GetMessages() {
+			if hm.GetMessage().GetMessage() == nil {
+				empty++ // a stub (group event, deleted, not yet decrypted)
+			}
 			evt, err := b.cli.ParseWebMessage(jid, hm.GetMessage())
 			if err != nil {
+				bad++
 				continue
 			}
-			if en, ok := b.entryFor(evt); ok && !b.hist.hasWAID(en.WAID) {
-				en.History = true
-				got = append(got, en)
+			en, ok := b.entryFor(evt)
+			if !ok {
+				continue
 			}
+			if b.hist.hasWAID(en.WAID) {
+				known++
+				continue
+			}
+			en.History = true
+			en.Media = b.saveMedia(evt.Message, en)
+			got = append(got, en)
 		}
+		warnf("history sync: %s: %d messages, %d already stored, %d without content, %d unparsable",
+			b.cfg.chatByJID(jid).Name, len(conv.GetMessages()), known, empty, bad)
 	}
 	slices.SortStableFunc(got, func(x, y entry) int { return strings.Compare(x.Time, y.Time) })
 	for _, en := range got {
@@ -357,8 +379,9 @@ type chatInfo struct {
 	Name       string `json:"name"`
 	Group      bool   `json:"group"`
 	Configured string `json:"configured,omitempty"`
-	Last       int64  `json:"last,omitempty"`  // unix time of the last message seen
-	Count      int    `json:"count,omitempty"` // messages seen live
+	Last       int64  `json:"last,omitempty"`      // unix time of the last message seen
+	Count      int    `json:"count,omitempty"`     // messages seen live
+	Community  string `json:"community,omitempty"` // the community it belongs to, or "(community)" for one
 }
 
 // listChats lists groups and saved contacts whose name or number contains
@@ -374,8 +397,8 @@ func (b *bridge) listChats(ctx context.Context, filter string, recent bool) ([]c
 		return false
 	}
 	var out []chatInfo
-	add := func(jid types.JID, name string, group bool) {
-		ci := chatInfo{JID: jid.String(), Name: name, Group: group}
+	add := func(jid types.JID, name string, group bool, community string) {
+		ci := chatInfo{JID: jid.String(), Name: name, Group: group, Community: community}
 		if cc := b.cfg.chatByJID(jid); cc != nil {
 			ci.Configured = cc.Name
 		}
@@ -390,9 +413,20 @@ func (b *bridge) listChats(ctx context.Context, filter string, recent bool) ([]c
 	if err != nil {
 		return nil, fmt.Errorf("listing groups: %v", err)
 	}
+	names := map[types.JID]string{}
 	for _, g := range groups {
-		if match(g.Name, g.JID.User) {
-			add(g.JID, g.Name, true)
+		names[g.JID] = g.Name
+	}
+	for _, g := range groups {
+		parent := names[g.LinkedParentJID]
+		if !g.LinkedParentJID.IsEmpty() && parent == "" {
+			parent = g.LinkedParentJID.String()
+		}
+		if g.IsParent {
+			parent = "(community)"
+		}
+		if match(g.Name, g.JID.User, parent) {
+			add(g.JID, g.Name, true, parent)
 		}
 	}
 	contacts, err := b.cli.Store.Contacts.GetAllContacts(ctx)
@@ -404,7 +438,7 @@ func (b *bridge) listChats(ctx context.Context, filter string, recent bool) ([]c
 			continue // only saved contacts with a phone-number JID
 		}
 		if match(c.FullName, c.FirstName, jid.User) {
-			add(jid, c.FullName, false)
+			add(jid, c.FullName, false, "")
 		}
 	}
 	if recent {

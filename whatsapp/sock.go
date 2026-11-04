@@ -17,7 +17,7 @@ import (
 // request line, one JSON response line, per connection.
 
 type request struct {
-	Op      string `json:"op"` // status, read, wait, send, chats
+	Op      string `json:"op"` // status, read, wait, send, chats, backfill
 	AfterID int64  `json:"after_id,omitempty"`
 	Chat    string `json:"chat,omitempty"`
 	Limit   int    `json:"limit,omitempty"`
@@ -25,7 +25,7 @@ type request struct {
 	Text    string `json:"text,omitempty"`
 	Agent   string `json:"agent,omitempty"`
 	Filter  string `json:"filter,omitempty"`
-	Recent  bool   `json:"recent,omitempty"` // chats: only ones with activity, newest first
+	Recent  bool   `json:"recent,omitempty"` // chats: only ones with activity, newest first; backfill: before the newest message
 }
 
 type response struct {
@@ -38,6 +38,7 @@ type response struct {
 	TimedOut    bool    `json:"timed_out,omitempty"`
 
 	Sent  *entry     `json:"sent,omitempty"`
+	Info  string     `json:"info,omitempty"`
 	Chats []chatInfo `json:"chats,omitempty"`
 
 	Status *status `json:"status,omitempty"`
@@ -121,6 +122,7 @@ func (b *bridge) handleConn(c net.Conn) {
 }
 
 func (b *bridge) handle(req request) (resp response) {
+	var err error
 	if req.Chat != "" && req.Op != "send" && b.cfg.chatByName(req.Chat) == nil {
 		resp.Error = fmt.Sprintf("unknown chat '%s' (see wa_chats)", req.Chat)
 		return
@@ -190,6 +192,12 @@ func (b *bridge) handle(req request) (resp response) {
 			resp.Error = err.Error()
 		} else {
 			resp.Sent = &e
+		}
+	case "backfill":
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		if resp.Info, err = b.backfill(ctx, req.Chat, req.Limit, req.Recent); err != nil {
+			resp.Error = err.Error()
 		}
 	case "chats":
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)

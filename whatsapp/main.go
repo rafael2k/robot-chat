@@ -14,6 +14,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -30,13 +31,17 @@ const usage = `usage: robot-chat-whatsapp [-c CONFIG] COMMAND
 commands:
   pair [-png FILE]      link this bridge to your phone (WhatsApp > Linked devices)
   pair -phone NUMBER    the same with a pairing code typed on the phone, no QR
-  serve [-phone NUMBER] run the daemon: WhatsApp session, IRC relay, socket;
-                        -phone: pair first if needed, keeping the phone's history sync
+  serve [-phone NUMBER | -png FILE]
+                        run the daemon: WhatsApp session, IRC relay, socket; if not
+                        paired, pair first (code or QR), keeping the phone's history sync
   chats [-recent] [FILTER]
                         find group and contact JIDs for the config (daemon running);
                         -recent: only chats with activity, newest first
   status                show the daemon's status
   send CHAT [TEXT|-]    send to an allowlisted rw chat (text from stdin with -)
+  backfill [-latest] CHAT [COUNT]
+                        ask the phone for COUNT (default 50) messages of CHAT older
+                        than the oldest stored (-latest: than the newest, fills gaps)
   mcp [-agent NAME]     MCP stdio server for an agent session
   unlink                log out and remove this linked device
 
@@ -71,9 +76,10 @@ func main() {
 	case "serve":
 		sub := flag.NewFlagSet("serve", flag.ExitOnError)
 		phone := sub.String("phone", "", "if not paired yet: pair first with a pairing code for this number")
+		png := sub.String("png", "", "if not paired yet: pair first with a QR code, also written to this PNG file")
 		sub.Parse(args)
-		err = cmdServe(cfg, *phone)
-	case "chats", "status", "send":
+		err = cmdServe(cfg, *phone, *png)
+	case "chats", "status", "send", "backfill":
 		err = cmdClient(cfg, cmd, args)
 	case "mcp":
 		sub := flag.NewFlagSet("mcp", flag.ExitOnError)
@@ -231,15 +237,15 @@ func cmdUnlink(cfg *config) error {
 	return nil
 }
 
-func cmdServe(cfg *config, phone string) error {
+func cmdServe(cfg *config, phone, png string) error {
 	ctx := context.Background()
 	container, dev, err := openDevice(ctx, cfg)
 	if err != nil {
 		return err
 	}
 	defer container.Close()
-	if dev.ID == nil && phone == "" {
-		return errors.New("not paired: run 'robot-chat-whatsapp pair' (or 'serve -phone NUMBER') first")
+	if dev.ID == nil && phone == "" && png == "" {
+		return errors.New("not paired: run 'serve -phone NUMBER' or 'serve -png FILE' to pair first")
 	}
 	if len(cfg.Chats) == 0 {
 		warnf("no chats allowlisted in %s: nothing will be passed on (find JIDs with 'chats')", cfg.Path)
@@ -257,7 +263,7 @@ func cmdServe(cfg *config, phone string) error {
 	}
 	if dev.ID == nil {
 		// Pair in this process, so the phone's history sync reaches it.
-		if err := pairClient(ctx, b.cli, phone, ""); err != nil {
+		if err := pairClient(ctx, b.cli, phone, png); err != nil {
 			return err
 		}
 	} else if err := b.cli.Connect(); err != nil {
@@ -307,6 +313,21 @@ func cmdClient(cfg *config, cmd string, args []string) error {
 			req.Recent, args = true, args[1:]
 		}
 		req.Filter = strings.Join(args, " ")
+	case "backfill":
+		if len(args) > 0 && args[0] == "-latest" {
+			req.Recent, args = true, args[1:]
+		}
+		if len(args) < 1 || len(args) > 2 {
+			return errors.New("usage: backfill [-latest] CHAT [COUNT]")
+		}
+		req.Chat, req.Limit = args[0], 50
+		if len(args) == 2 {
+			n, err := strconv.Atoi(args[1])
+			if err != nil || n < 1 {
+				return errors.New("backfill: COUNT must be a number >= 1")
+			}
+			req.Limit = n
+		}
 	case "send":
 		if len(args) < 1 || len(args) > 2 {
 			return errors.New("usage: send CHAT [TEXT|-]")
@@ -343,8 +364,15 @@ func cmdClient(cfg *config, cmd string, args []string) error {
 			if c.Last > 0 {
 				last = time.Unix(c.Last, 0).Format("2006-01-02 15:04")
 			}
+			if c.Community != "" {
+				conf += "  [" + c.Community + "]"
+			}
 			fmt.Printf("%s  %-16s %4d  %-32s  %s%s\n", kind, last, c.Count, c.JID, c.Name, conf)
 		}
+		return nil
+	}
+	if r.Info != "" {
+		fmt.Println(r.Info)
 		return nil
 	}
 	enc := json.NewEncoder(os.Stdout)
